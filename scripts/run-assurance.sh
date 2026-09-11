@@ -24,6 +24,11 @@ RUN_DIR="run"
 mkdir -p "$RUN_DIR"
 : > "$RUN_DIR/summary.md"
 
+# Always grab kane-cli's own trace logs on the way out, success or failure —
+# they're the best lead we have on anything that crashes without printing a
+# reason (see capture_kane_trace_logs in lib.sh for what is/isn't copied).
+trap capture_kane_trace_logs EXIT
+
 SOURCE_SPEC="${SOURCE_SPEC:-sources/feature-spec.md}"
 SOURCE_ID="${SOURCE_ID:-feature-spec}"
 MAX_DESIGN="${MAX_DESIGN:-4}"

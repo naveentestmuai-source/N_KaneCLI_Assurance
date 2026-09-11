@@ -48,6 +48,22 @@ best_effort_evidence_link() {
   grep -Eo 'https://test-manager\.[a-zA-Z0-9./_?=&%:-]+' "$file" 2>/dev/null | tail -1 || true
 }
 
+# capture_kane_trace_logs
+# kane-cli writes detailed per-command trace logs under
+# ~/.testmuai/kaneai/assurance/*/logs/*.log regardless of what it prints to
+# stdout/stderr (see the "trace" field on every run_start event) — these are
+# far more likely to explain a silent crash than the terminal output. Copy
+# ONLY *.log files that live under a "logs/" directory, never the rest of
+# ~/.testmuai (which can hold local auth/session state) — this repo is
+# public and the artifact must never carry credentials.
+capture_kane_trace_logs() {
+  local dest="${RUN_DIR:-run}/kane-trace-logs"
+  mkdir -p "$dest"
+  find "$HOME/.testmuai" -type f -path '*/logs/*.log' 2>/dev/null | while IFS= read -r f; do
+    cp "$f" "$dest/$(echo "$f" | sed "s#^$HOME/##; s#/#__#g")" 2>/dev/null || true
+  done
+}
+
 # dump_stderr_to_summary <stderr-file> <label>
 # When a stage fails without a clean `done` event, the NDJSON file alone
 # doesn't explain why — kane-cli's actual error usually lands on stderr.

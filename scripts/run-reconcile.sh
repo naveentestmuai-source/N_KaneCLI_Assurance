@@ -18,6 +18,7 @@ require_cmd jq
 
 RUN_DIR="run"
 mkdir -p "$RUN_DIR"
+trap capture_kane_trace_logs EXIT
 
 NEW_SPEC="${NEW_SPEC:-sources/feature-spec-v2.md}"
 SOURCE_ID="${SOURCE_ID:-feature-spec}"

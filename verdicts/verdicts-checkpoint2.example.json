@@ -1,0 +1,6 @@
+[
+  { "ref": "ac-1", "resolution": "approved", "reason": "State-transition criterion matches spec R1: home page -> search results page." },
+  { "ref": "ac-2", "resolution": "approved", "reason": "Presence criterion matches spec R1: results list at least one matching title." },
+  { "ref": "sc-1", "resolution": "approved", "reason": "Happy-path scenario is correctly scoped to what the spec promises." },
+  { "ref": "t-1", "resolution": "approved", "reason": "Test is faithful to sc-1 and tagged to the criteria it verifies." }
+]

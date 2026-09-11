@@ -41,7 +41,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # kane-cli's own dependency tree (pdfjs-dist@6.1.200) declares
+          # engines: "node: >=22.13.0 || >=24" — npm warns EBADENGINE about
+          # this under Node 20 but still installs, which likely explains
+          # context review crashing silently rather than erroring cleanly.
+          node-version: "22"
 
       - name: Ensure Google Chrome is available
         run: |

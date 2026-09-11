@@ -74,7 +74,15 @@ if [ "$UC_COUNT" -eq 0 ]; then
 fi
 summary "- \`context extract\`: $UC_COUNT use-case(s) proposed"
 
-kane-cli context review --verdicts "$RUN_DIR/verdicts-checkpoint1.json" --json 2> "$RUN_DIR/03-review1.stderr.log" \
+# NOTE: kane-cli 0.8.12's `context review --verdicts <file> --json` crashes
+# silently (no stdout, no stderr, no trace log, bare exit 1) immediately
+# after echoing the refs it was given — reproduced 4/4 times across both
+# Node 20 and Node 22, with 2 and 3 use-cases. Using the structured
+# `--approve <refs...>` flag instead, per ASSURANCE-HANDBOOK.md §2's command
+# reference, as a workaround. If this also crashes, the bug is in `context
+# review` generally, not specific to file-based verdicts.
+mapfile -t uc_refs < <(jq -r '.[].ref' "$RUN_DIR/verdicts-checkpoint1.json")
+kane-cli context review --approve "${uc_refs[@]}" --json 2> "$RUN_DIR/03-review1.stderr.log" \
   | tee "$RUN_DIR/03-review1.ndjson"
 ex="$(kane_exit "$RUN_DIR/03-review1.ndjson")"
 if [ "$ex" != "0" ]; then
@@ -82,7 +90,7 @@ if [ "$ex" != "0" ]; then
   dump_stderr_to_summary "$RUN_DIR/03-review1.stderr.log" "context review (checkpoint 1)"
   exit 1
 fi
-summary "- **Checkpoint 1**: $UC_COUNT use-case(s) approved"
+summary "- **Checkpoint 1**: $UC_COUNT use-case(s) approved (\`--approve\`, workaround for a \`--verdicts\` crash — see script comment)"
 
 # --- Stage 4: design tests per approved use-case ------------------------
 echo "== design tests =="
@@ -129,7 +137,8 @@ jq -s '[ .[] | select(.label != "usecase" and .status == "derived") |
 
 DESIGN_COUNT=$(jq 'length' "$RUN_DIR/verdicts-checkpoint2.json")
 if [ "$DESIGN_COUNT" -gt 0 ]; then
-  kane-cli context review --verdicts "$RUN_DIR/verdicts-checkpoint2.json" --json 2> "$RUN_DIR/06-review2.stderr.log" \
+  mapfile -t design_refs < <(jq -r '.[].ref' "$RUN_DIR/verdicts-checkpoint2.json")
+  kane-cli context review --approve "${design_refs[@]}" --json 2> "$RUN_DIR/06-review2.stderr.log" \
     | tee "$RUN_DIR/06-review2.ndjson"
   ex="$(kane_exit "$RUN_DIR/06-review2.ndjson")"
   if [ "$ex" != "0" ]; then
@@ -137,7 +146,7 @@ if [ "$DESIGN_COUNT" -gt 0 ]; then
     dump_stderr_to_summary "$RUN_DIR/06-review2.stderr.log" "context review (checkpoint 2)"
     exit 1
   fi
-  summary "- **Checkpoint 2**: $DESIGN_COUNT design artifact(s) approved"
+  summary "- **Checkpoint 2**: $DESIGN_COUNT design artifact(s) approved (\`--approve\`)"
 else
   summary "- **Checkpoint 2**: nothing new to review (no use-case cleared design)"
 fi

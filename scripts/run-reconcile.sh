@@ -30,7 +30,8 @@ summary "exit 3 with a stored archive plan is the expected, correct outcome."
 summary ""
 
 out="$RUN_DIR/09-reconcile.ndjson"
-kane-cli maintain reconcile --from "$NEW_SPEC" --source-id "$SOURCE_ID" --mode agent | tee "$out"
+err="$RUN_DIR/09-reconcile.stderr.log"
+kane-cli maintain reconcile --from "$NEW_SPEC" --source-id "$SOURCE_ID" --mode agent 2> "$err" | tee "$out"
 ex="$(kane_exit "$out")"
 
 case "$ex" in
@@ -44,8 +45,13 @@ case "$ex" in
     summary "  This is the strongest moment in the demo — proven coverage is about to collapse"
     summary "  for the requirement(s) whose evidence no longer traces to a live source."
     ;;
+  "")
+    summary "- \`maintain reconcile\`: **no \`done\` event in the stream** — process may have crashed. See \`$(basename "$out")\`."
+    dump_stderr_to_summary "$err" "maintain reconcile"
+    ;;
   *)
     summary "- \`maintain reconcile\`: unexpected exit \`$ex\` — see \`$(basename "$out")\`"
+    dump_stderr_to_summary "$err" "maintain reconcile"
     ;;
 esac
 

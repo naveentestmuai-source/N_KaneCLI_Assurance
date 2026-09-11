@@ -43,10 +43,12 @@ BALANCE_BEFORE=$(jq -r '.balance // .credits // empty' "$RUN_DIR/balance-before.
 
 # --- Stage 1+2: capture + extract ---------------------------------------
 echo "== context ingest =="
-kane-cli context ingest "$SOURCE_SPEC" --mode agent | tee "$RUN_DIR/01-ingest.ndjson"
+kane-cli context ingest "$SOURCE_SPEC" --mode agent 2> "$RUN_DIR/01-ingest.stderr.log" \
+  | tee "$RUN_DIR/01-ingest.ndjson"
 ex="$(kane_exit "$RUN_DIR/01-ingest.ndjson")"
 if [ "$ex" != "0" ]; then
   summary "**FAILED at \`context ingest\`** (exit \`$ex\`) — see \`01-ingest.ndjson\`."
+  dump_stderr_to_summary "$RUN_DIR/01-ingest.stderr.log" "context ingest"
   exit 1
 fi
 summary "- \`context ingest\`: done"
@@ -67,10 +69,12 @@ if [ "$UC_COUNT" -eq 0 ]; then
 fi
 summary "- \`context extract\`: $UC_COUNT use-case(s) proposed"
 
-kane-cli context review --verdicts "$RUN_DIR/verdicts-checkpoint1.json" --json | tee "$RUN_DIR/03-review1.ndjson"
+kane-cli context review --verdicts "$RUN_DIR/verdicts-checkpoint1.json" --json 2> "$RUN_DIR/03-review1.stderr.log" \
+  | tee "$RUN_DIR/03-review1.ndjson"
 ex="$(kane_exit "$RUN_DIR/03-review1.ndjson")"
 if [ "$ex" != "0" ]; then
   summary "**FAILED at checkpoint 1** (exit \`$ex\`) — see \`03-review1.ndjson\`."
+  dump_stderr_to_summary "$RUN_DIR/03-review1.stderr.log" "context review (checkpoint 1)"
   exit 1
 fi
 summary "- **Checkpoint 1**: $UC_COUNT use-case(s) approved"
@@ -83,8 +87,9 @@ summary ""
 for ref in $(jq -r '.[].ref' "$RUN_DIR/verdicts-checkpoint1.json"); do
   safe_ref="$(echo "$ref" | tr -c 'A-Za-z0-9_-' '_')"
   out="$RUN_DIR/04-design-${safe_ref}.ndjson"
+  err="$RUN_DIR/04-design-${safe_ref}.stderr.log"
   echo "-- design tests for $ref --"
-  kane-cli design tests --use-case "$ref" --mode ci --max "$MAX_DESIGN" | tee "$out"
+  kane-cli design tests --use-case "$ref" --mode ci --max "$MAX_DESIGN" 2> "$err" | tee "$out"
   ex="$(kane_exit "$out")"
   case "$ex" in
     0)
@@ -94,6 +99,7 @@ for ref in $(jq -r '.[].ref' "$RUN_DIR/verdicts-checkpoint1.json"); do
       ;;
     "")
       summary "- \`$ref\`: **no \`done\` event in the stream** — process may have crashed. See \`$out\`."
+      dump_stderr_to_summary "$err" "design tests ($ref)"
       NEEDS_ATTENTION=1
       ;;
     *)
@@ -118,10 +124,12 @@ jq -s '[ .[] | select(.label != "usecase" and .status == "derived") |
 
 DESIGN_COUNT=$(jq 'length' "$RUN_DIR/verdicts-checkpoint2.json")
 if [ "$DESIGN_COUNT" -gt 0 ]; then
-  kane-cli context review --verdicts "$RUN_DIR/verdicts-checkpoint2.json" --json | tee "$RUN_DIR/06-review2.ndjson"
+  kane-cli context review --verdicts "$RUN_DIR/verdicts-checkpoint2.json" --json 2> "$RUN_DIR/06-review2.stderr.log" \
+    | tee "$RUN_DIR/06-review2.ndjson"
   ex="$(kane_exit "$RUN_DIR/06-review2.ndjson")"
   if [ "$ex" != "0" ]; then
     summary "**FAILED at checkpoint 2** (exit \`$ex\`) — see \`06-review2.ndjson\`."
+    dump_stderr_to_summary "$RUN_DIR/06-review2.stderr.log" "context review (checkpoint 2)"
     exit 1
   fi
   summary "- **Checkpoint 2**: $DESIGN_COUNT design artifact(s) approved"

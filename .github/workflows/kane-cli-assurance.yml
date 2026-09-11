@@ -61,6 +61,14 @@ jobs:
       - name: Verify kane-cli
         run: kane-cli --version
 
+      # A fresh install reports "Skill update available: not installed" and
+      # some assurance commands depend on this companion package — install it
+      # up front rather than finding out mid-lifecycle. Non-fatal: if this
+      # isn't actually required on your kane-cli version, we don't want a
+      # missing/renamed subcommand here to block the whole run.
+      - name: Install kane-cli skill
+        run: kane-cli install skill || echo "::warning::'kane-cli install skill' failed or is not needed on this version — continuing."
+
       - name: Authenticate
         env:
           LT_USERNAME: ${{ secrets.LT_USERNAME }}

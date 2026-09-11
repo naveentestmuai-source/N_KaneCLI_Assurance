@@ -47,3 +47,21 @@ best_effort_evidence_link() {
   local file="$1"
   grep -Eo 'https://test-manager\.[a-zA-Z0-9./_?=&%:-]+' "$file" 2>/dev/null | tail -1 || true
 }
+
+# dump_stderr_to_summary <stderr-file> <label>
+# When a stage fails without a clean `done` event, the NDJSON file alone
+# doesn't explain why — kane-cli's actual error usually lands on stderr.
+# Fold it straight into the job summary so it's visible without downloading
+# the artifact.
+dump_stderr_to_summary() {
+  local file="$1" label="$2"
+  if [ -s "$file" ]; then
+    summary ""
+    summary "<details><summary>stderr — $label</summary>"
+    summary ""
+    summary '```'
+    summary "$(cat "$file")"
+    summary '```'
+    summary "</details>"
+  fi
+}

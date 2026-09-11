@@ -74,30 +74,49 @@ if [ "$UC_COUNT" -eq 0 ]; then
 fi
 summary "- \`context extract\`: $UC_COUNT use-case(s) proposed"
 
-# NOTE: kane-cli 0.8.12's `context review --verdicts <file> --json` crashes
-# silently (no stdout, no stderr, no trace log, bare exit 1) immediately
-# after echoing the refs it was given — reproduced 4/4 times across both
-# Node 20 and Node 22, with 2 and 3 use-cases. Using the structured
-# `--approve <refs...>` flag instead, per ASSURANCE-HANDBOOK.md §2's command
-# reference, as a workaround. If this also crashes, the bug is in `context
-# review` generally, not specific to file-based verdicts.
+# NOTE: kane-cli 0.8.12's `context review` crashes silently (no stdout, no
+# stderr, no trace log, bare exit 1) immediately after echoing the refs it
+# was given — reproduced with both --verdicts <file> and --approve <refs...>,
+# on Node 20 and Node 22, with 2 and 3 use-cases batched together every time.
+# Testing whether it's specifically a batching bug: review each ref with its
+# own `context review --approve <ref>` call instead of one call for all of
+# them. Refs that fail are skipped for design rather than aborting the run,
+# so a partial batching bug doesn't block the whole pipeline.
 mapfile -t uc_refs < <(jq -r '.[].ref' "$RUN_DIR/verdicts-checkpoint1.json")
-kane-cli context review --approve "${uc_refs[@]}" --json 2> "$RUN_DIR/03-review1.stderr.log" \
-  | tee "$RUN_DIR/03-review1.ndjson"
-ex="$(kane_exit "$RUN_DIR/03-review1.ndjson")"
-if [ "$ex" != "0" ]; then
-  summary "**FAILED at checkpoint 1** (exit \`$ex\`) — see \`03-review1.ndjson\`."
-  dump_stderr_to_summary "$RUN_DIR/03-review1.stderr.log" "context review (checkpoint 1)"
+approved_refs=()
+CHECKPOINT1_FAIL=0
+for ref in "${uc_refs[@]}"; do
+  safe_ref="$(echo "$ref" | tr -c 'A-Za-z0-9_-' '_')"
+  out="$RUN_DIR/03-review1-${safe_ref}.ndjson"
+  err="$RUN_DIR/03-review1-${safe_ref}.stderr.log"
+  kane-cli context review --approve "$ref" --json 2> "$err" | tee "$out"
+  ex="$(kane_exit "$out")"
+  if [ "$ex" = "0" ]; then
+    approved_refs+=("$ref")
+  else
+    CHECKPOINT1_FAIL=$((CHECKPOINT1_FAIL + 1))
+    summary "- \`$ref\`: **checkpoint 1 review failed individually too** (exit \`${ex:-<none>}\`) — see \`$(basename "$out")\`."
+    dump_stderr_to_summary "$err" "context review ($ref)"
+  fi
+done
+
+if [ "${#approved_refs[@]}" -eq 0 ]; then
+  summary "**FAILED at checkpoint 1** — reviewing refs one at a time still failed for all $UC_COUNT. This is not a batching bug — \`context review\` itself is crashing regardless of how it's called. This needs the kane-cli team, not another workaround here."
   exit 1
 fi
-summary "- **Checkpoint 1**: $UC_COUNT use-case(s) approved (\`--approve\`, workaround for a \`--verdicts\` crash — see script comment)"
+if [ "$CHECKPOINT1_FAIL" -gt 0 ]; then
+  summary "- **Checkpoint 1**: ${#approved_refs[@]}/$UC_COUNT use-case(s) approved one at a time (batched \`context review\` crashes — see script comment; $CHECKPOINT1_FAIL failed even individually)"
+  NEEDS_ATTENTION=1
+else
+  summary "- **Checkpoint 1**: ${#approved_refs[@]}/$UC_COUNT use-case(s) approved, one \`context review\` call per ref (batched calls crash — see script comment)"
+fi
 
 # --- Stage 4: design tests per approved use-case ------------------------
 echo "== design tests =="
 summary ""
 summary "### Design"
 summary ""
-for ref in $(jq -r '.[].ref' "$RUN_DIR/verdicts-checkpoint1.json"); do
+for ref in "${approved_refs[@]}"; do
   safe_ref="$(echo "$ref" | tr -c 'A-Za-z0-9_-' '_')"
   out="$RUN_DIR/04-design-${safe_ref}.ndjson"
   err="$RUN_DIR/04-design-${safe_ref}.stderr.log"
@@ -137,16 +156,28 @@ jq -s '[ .[] | select(.label != "usecase" and .status == "derived") |
 
 DESIGN_COUNT=$(jq 'length' "$RUN_DIR/verdicts-checkpoint2.json")
 if [ "$DESIGN_COUNT" -gt 0 ]; then
+  # Same one-call-per-ref approach as checkpoint 1 — see the note there.
   mapfile -t design_refs < <(jq -r '.[].ref' "$RUN_DIR/verdicts-checkpoint2.json")
-  kane-cli context review --approve "${design_refs[@]}" --json 2> "$RUN_DIR/06-review2.stderr.log" \
-    | tee "$RUN_DIR/06-review2.ndjson"
-  ex="$(kane_exit "$RUN_DIR/06-review2.ndjson")"
-  if [ "$ex" != "0" ]; then
-    summary "**FAILED at checkpoint 2** (exit \`$ex\`) — see \`06-review2.ndjson\`."
-    dump_stderr_to_summary "$RUN_DIR/06-review2.stderr.log" "context review (checkpoint 2)"
-    exit 1
+  design_approved=0
+  design_fail=0
+  for ref in "${design_refs[@]}"; do
+    safe_ref="$(echo "$ref" | tr -c 'A-Za-z0-9_-' '_')"
+    out="$RUN_DIR/06-review2-${safe_ref}.ndjson"
+    err="$RUN_DIR/06-review2-${safe_ref}.stderr.log"
+    kane-cli context review --approve "$ref" --json 2> "$err" | tee "$out"
+    ex="$(kane_exit "$out")"
+    if [ "$ex" = "0" ]; then
+      design_approved=$((design_approved + 1))
+    else
+      design_fail=$((design_fail + 1))
+      summary "- \`$ref\`: **checkpoint 2 review failed** (exit \`${ex:-<none>}\`) — see \`$(basename "$out")\`."
+      dump_stderr_to_summary "$err" "context review ($ref)"
+    fi
+  done
+  summary "- **Checkpoint 2**: $design_approved/$DESIGN_COUNT design artifact(s) approved, one \`context review\` call per ref"
+  if [ "$design_fail" -gt 0 ]; then
+    NEEDS_ATTENTION=1
   fi
-  summary "- **Checkpoint 2**: $DESIGN_COUNT design artifact(s) approved (\`--approve\`)"
 else
   summary "- **Checkpoint 2**: nothing new to review (no use-case cleared design)"
 fi

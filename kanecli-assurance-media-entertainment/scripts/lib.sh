@@ -2,30 +2,16 @@
 # Shared helpers for the kane-cli assurance CI scripts.
 # Source this file; do not execute it directly.
 
-# kane_exit <ndjson-file> [fallback-exit-code]
+# kane_exit <ndjson-file>
 # Reads the exit code out of the last {"type":"done",...} event in an NDJSON
 # stream instead of trusting $?. kane-cli's own docs call this out as
 # necessary on Windows (a libuv teardown bug collapses every real exit code
 # to 127 there) and it is good practice everywhere else too, since the
 # assurance commands use exit codes as part of their control flow:
 #   0 = success · 2 = refusal (see done.next for the fix) · 3 = paused/resumable
-#
-# Not every kane-cli subcommand emits a `done` event on every code path —
-# `context review --approve <ref> --json` (0.8.12) has been observed to print
-# a plain-text "review: committed record N — 1 approved" line instead, with
-# no JSON at all. When no `done` event is found, fall back to the real
-# process exit code (pass ${PIPESTATUS[0]} from the caller, captured right
-# after the `| tee` that produced the file) rather than reporting failure
-# for a command that actually succeeded.
 kane_exit() {
-  local file="$1" fallback="${2:-}"
-  local found
-  found="$(grep '"type":"done"' "$file" | tail -1 | jq -r '.exit_code // empty')"
-  if [ -n "$found" ]; then
-    echo "$found"
-  else
-    echo "$fallback"
-  fi
+  local file="$1"
+  grep '"type":"done"' "$file" | tail -1 | jq -r '.exit_code // empty'
 }
 
 # kane_field <ndjson-file> <jq-filter>

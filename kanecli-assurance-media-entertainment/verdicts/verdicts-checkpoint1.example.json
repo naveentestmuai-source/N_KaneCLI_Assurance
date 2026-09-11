@@ -1,0 +1,6 @@
+[
+  { "ref": "uc-1", "resolution": "approved", "reason": "Cites spec R3 verbatim; trailer-playback contract matches the requirement with no invented behaviour." },
+  { "ref": "uc-2", "resolution": "approved", "reason": "Cites spec R4 verbatim; trailer-close contract matches the requirement." },
+  { "ref": "uc-3", "resolution": "approved", "reason": "Cites spec R1 verbatim; search entry point and result expectation are correct." },
+  { "ref": "uc-4", "resolution": "approved", "reason": "Cites spec R2 verbatim; title detail expectations are correct." }
+]

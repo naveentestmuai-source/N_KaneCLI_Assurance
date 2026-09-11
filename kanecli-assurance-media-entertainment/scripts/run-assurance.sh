@@ -50,7 +50,7 @@ BALANCE_BEFORE=$(jq -r '.balance // .credits // empty' "$RUN_DIR/balance-before.
 echo "== context ingest =="
 kane-cli context ingest "$SOURCE_SPEC" --mode agent 2> "$RUN_DIR/01-ingest.stderr.log" \
   | tee "$RUN_DIR/01-ingest.ndjson"
-ex="$(kane_exit "$RUN_DIR/01-ingest.ndjson" "${PIPESTATUS[0]}")"
+ex="$(kane_exit "$RUN_DIR/01-ingest.ndjson")"
 if [ "$ex" != "0" ]; then
   summary "**FAILED at \`context ingest\`** (exit \`$ex\`) — see \`01-ingest.ndjson\`."
   dump_stderr_to_summary "$RUN_DIR/01-ingest.stderr.log" "context ingest"
@@ -74,16 +74,14 @@ if [ "$UC_COUNT" -eq 0 ]; then
 fi
 summary "- \`context extract\`: $UC_COUNT use-case(s) proposed"
 
-# NOTE: kane-cli 0.8.12's `context review --json` does not reliably emit a
-# {"type":"done",...} event when approving use-cases one at a time — it can
-# print a plain-text "review: committed record N — 1 approved" line instead,
-# with no JSON at all. kane_exit() falls back to the real process exit code
-# (via PIPESTATUS) in that case, so this loop trusts the command actually
-# succeeded rather than reporting failure. Reviewing one ref per call (instead
-# of batching every ref into a single --approve call) also sidesteps an
-# earlier-observed crash on multi-ref batches — see git history / README if
-# that resurfaces. Any ref whose call still exits non-zero is skipped for
-# design rather than aborting the run.
+# NOTE: kane-cli 0.8.12's `context review` crashes silently (no stdout, no
+# stderr, no trace log, bare exit 1) immediately after echoing the refs it
+# was given — reproduced with both --verdicts <file> and --approve <refs...>,
+# on Node 20 and Node 22, with 2 and 3 use-cases batched together every time.
+# Testing whether it's specifically a batching bug: review each ref with its
+# own `context review --approve <ref>` call instead of one call for all of
+# them. Refs that fail are skipped for design rather than aborting the run,
+# so a partial batching bug doesn't block the whole pipeline.
 mapfile -t uc_refs < <(jq -r '.[].ref' "$RUN_DIR/verdicts-checkpoint1.json")
 approved_refs=()
 CHECKPOINT1_FAIL=0
@@ -92,26 +90,25 @@ for ref in "${uc_refs[@]}"; do
   out="$RUN_DIR/03-review1-${safe_ref}.ndjson"
   err="$RUN_DIR/03-review1-${safe_ref}.stderr.log"
   kane-cli context review --approve "$ref" --json 2> "$err" | tee "$out"
-  status="${PIPESTATUS[0]}"
-  ex="$(kane_exit "$out" "$status")"
+  ex="$(kane_exit "$out")"
   if [ "$ex" = "0" ]; then
     approved_refs+=("$ref")
   else
     CHECKPOINT1_FAIL=$((CHECKPOINT1_FAIL + 1))
-    summary "- \`$ref\`: **checkpoint 1 review failed** (exit \`${ex:-<none>}\`) — see \`$(basename "$out")\`."
+    summary "- \`$ref\`: **checkpoint 1 review failed individually too** (exit \`${ex:-<none>}\`) — see \`$(basename "$out")\`."
     dump_stderr_to_summary "$err" "context review ($ref)"
   fi
 done
 
 if [ "${#approved_refs[@]}" -eq 0 ]; then
-  summary "**FAILED at checkpoint 1** — reviewing refs one at a time failed for all $UC_COUNT. See the per-ref \`03-review1-*.stderr.log\` files in the artifact."
+  summary "**FAILED at checkpoint 1** — reviewing refs one at a time still failed for all $UC_COUNT. This is not a batching bug — \`context review\` itself is crashing regardless of how it's called. This needs the kane-cli team, not another workaround here."
   exit 1
 fi
 if [ "$CHECKPOINT1_FAIL" -gt 0 ]; then
-  summary "- **Checkpoint 1**: ${#approved_refs[@]}/$UC_COUNT use-case(s) approved, one \`context review\` call per ref ($CHECKPOINT1_FAIL failed — see above)"
+  summary "- **Checkpoint 1**: ${#approved_refs[@]}/$UC_COUNT use-case(s) approved one at a time (batched \`context review\` crashes — see script comment; $CHECKPOINT1_FAIL failed even individually)"
   NEEDS_ATTENTION=1
 else
-  summary "- **Checkpoint 1**: ${#approved_refs[@]}/$UC_COUNT use-case(s) approved, one \`context review\` call per ref"
+  summary "- **Checkpoint 1**: ${#approved_refs[@]}/$UC_COUNT use-case(s) approved, one \`context review\` call per ref (batched calls crash — see script comment)"
 fi
 
 # --- Stage 4: design tests per approved use-case ------------------------
@@ -125,7 +122,7 @@ for ref in "${approved_refs[@]}"; do
   err="$RUN_DIR/04-design-${safe_ref}.stderr.log"
   echo "-- design tests for $ref --"
   kane-cli design tests --use-case "$ref" --mode ci --max "$MAX_DESIGN" 2> "$err" | tee "$out"
-  ex="$(kane_exit "$out" "${PIPESTATUS[0]}")"
+  ex="$(kane_exit "$out")"
   case "$ex" in
     0)
       gaps=$(kane_field "$out" '.gaps | length' 2>/dev/null); gaps="${gaps:-0}"
@@ -159,8 +156,7 @@ jq -s '[ .[] | select(.label != "usecase" and .status == "derived") |
 
 DESIGN_COUNT=$(jq 'length' "$RUN_DIR/verdicts-checkpoint2.json")
 if [ "$DESIGN_COUNT" -gt 0 ]; then
-  # Same one-call-per-ref approach as checkpoint 1, with the same
-  # done-event-may-be-missing fallback — see the note there.
+  # Same one-call-per-ref approach as checkpoint 1 — see the note there.
   mapfile -t design_refs < <(jq -r '.[].ref' "$RUN_DIR/verdicts-checkpoint2.json")
   design_approved=0
   design_fail=0
@@ -169,8 +165,7 @@ if [ "$DESIGN_COUNT" -gt 0 ]; then
     out="$RUN_DIR/06-review2-${safe_ref}.ndjson"
     err="$RUN_DIR/06-review2-${safe_ref}.stderr.log"
     kane-cli context review --approve "$ref" --json 2> "$err" | tee "$out"
-    status="${PIPESTATUS[0]}"
-    ex="$(kane_exit "$out" "$status")"
+    ex="$(kane_exit "$out")"
     if [ "$ex" = "0" ]; then
       design_approved=$((design_approved + 1))
     else

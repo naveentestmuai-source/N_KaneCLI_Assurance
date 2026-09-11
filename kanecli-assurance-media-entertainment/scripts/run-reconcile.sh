@@ -33,7 +33,7 @@ summary ""
 out="$RUN_DIR/09-reconcile.ndjson"
 err="$RUN_DIR/09-reconcile.stderr.log"
 kane-cli maintain reconcile --from "$NEW_SPEC" --source-id "$SOURCE_ID" --mode agent 2> "$err" | tee "$out"
-ex="$(kane_exit "$out" "${PIPESTATUS[0]}")"
+ex="$(kane_exit "$out")"
 
 case "$ex" in
   0)

@@ -1,0 +1,106 @@
+name: Kane CLI Assurance — Media & Entertainment
+
+# Runs the kane-cli assurance lifecycle (capture -> extract -> review ->
+# design -> review -> author -> measure) against sources/feature-spec.md and
+# publishes designed/proven coverage, generated tests, and sealed evidence
+# as workflow artifacts + a job summary.
+#
+# Required repo secrets (Settings -> Secrets and variables -> Actions):
+#   LT_USERNAME    your LambdaTest / TestMu AI username
+#   LT_ACCESS_KEY  your LambdaTest / TestMu AI access key (Dashboard -> Credentials)
+#
+# See README.md for setup and scripts/run-assurance.sh for the stage-by-stage logic.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_reconcile:
+        description: "Also run the requirements-change demo (maintain reconcile against feature-spec-v2.md)"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "sources/**"
+      - ".github/workflows/kane-cli-assurance.yml"
+
+# Avoid two store-mutating runs against the same .context state at once —
+# kane-cli's store is single-writer and a concurrent run fails with EXTRACT_LOCKED.
+concurrency:
+  group: kane-cli-assurance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  assurance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # kane-cli's own dependency tree (pdfjs-dist@6.1.200) declares
+          # engines: "node: >=22.13.0 || >=24" — npm warns EBADENGINE about
+          # this under Node 20 but still installs, which likely explains
+          # context review crashing silently rather than erroring cleanly.
+          node-version: "22"
+
+      - name: Ensure Google Chrome is available
+        run: |
+          if ! command -v google-chrome >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y wget gnupg
+            wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+            sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
+            sudo apt-get update
+            sudo apt-get install -y google-chrome-stable
+          fi
+          google-chrome --version
+
+      - name: Install kane-cli
+        run: npm install -g @testmuai/kane-cli@latest
+
+      - name: Verify kane-cli
+        run: kane-cli --version
+
+      # A fresh install reports "Skill update available: not installed" and
+      # some assurance commands depend on this companion package — install it
+      # up front rather than finding out mid-lifecycle. Non-fatal: if this
+      # isn't actually required on your kane-cli version, we don't want a
+      # missing/renamed subcommand here to block the whole run.
+      - name: Install kane-cli skill
+        run: kane-cli install skill || echo "::warning::'kane-cli install skill' failed or is not needed on this version — continuing."
+
+      - name: Authenticate
+        env:
+          LT_USERNAME: ${{ secrets.LT_USERNAME }}
+          LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
+        run: |
+          if [ -z "$LT_USERNAME" ] || [ -z "$LT_ACCESS_KEY" ]; then
+            echo "::error::LT_USERNAME and/or LT_ACCESS_KEY secrets are not set. See README.md."
+            exit 1
+          fi
+          kane-cli login --username "$LT_USERNAME" --access-key "$LT_ACCESS_KEY"
+
+      - name: Run assurance lifecycle
+        env:
+          MAX_DESIGN: 4
+          TITLE_SEARCH_TERM: Inception
+        run: bash scripts/run-assurance.sh
+
+      - name: Run requirements-change demo (maintain reconcile)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_reconcile == true }}
+        run: bash scripts/run-reconcile.sh
+
+      - name: Upload evidence & results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kane-cli-assurance-evidence-${{ github.run_number }}
+          path: |
+            run/**
+            .testmuai/tests/**
+          if-no-files-found: warn
+          retention-days: 30

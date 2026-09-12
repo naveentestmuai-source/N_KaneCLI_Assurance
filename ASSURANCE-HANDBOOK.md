@@ -128,6 +128,26 @@ Documented honestly, same as the upstream handbook:
   stream instead of `$?`. (The Linux GitHub Actions runner used here is not
   affected, but `scripts/lib.sh` parses `done.exit_code` anyway, for
   consistency with local Windows runs.)
+- **`{{variables}}` can go unresolved specifically at the final verification
+  checkpoint (kane-cli 0.8.12).** Action steps (e.g. "search for
+  `{{x_search_term}}`") resolve correctly, but a verification step that
+  compares against a variable (e.g. "assert the release year shows
+  `{{x_expected_release_year}}`") can receive the literal, un-substituted
+  `{{global.x_expected_release_year}}` string instead — which then fails to
+  match the real page content, even though `--variables` was passed the
+  documented `{"key": {"value": ...}}` shape with correct bare keys (no
+  `global.` prefix — that's kane-cli's own internal rewrite, not something you
+  add). This matches upstream report
+  [LambdaTest/kane-cli#87](https://github.com/LambdaTest/kane-cli/issues/87).
+  In this repo it shows up as the four "discover a title by search" tests
+  failing at their final step while both "trailer" tests pass — the trailer
+  tests' final assertions check page *state* ("a video player is visible")
+  rather than comparing against a variable's value, so they don't hit the
+  bug. There is no workaround available from the CI script side; a `proven`
+  percentage below `designed` for UC-1 in this demo is this bug, not a
+  product defect in TMDB. Re-check
+  [kane-cli#87](https://github.com/LambdaTest/kane-cli/issues/87) for a fix
+  before treating this stage as broken.
 
 ## 6. Troubleshooting
 

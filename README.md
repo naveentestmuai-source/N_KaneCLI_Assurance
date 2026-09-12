@@ -103,6 +103,12 @@ workflow). The run doesn't hard-fail just because one use-case needs a
 person — it keeps going and reports clearly, which is itself worth showing a
 customer: the tool tells you what it doesn't know instead of guessing.
 
+**If `proven` comes in below `designed` for the "discover a title by search"
+use-case specifically**, that's an upstream kane-cli issue with variable
+resolution at the final verification step, not a bug in this repo or a real
+product problem with TMDB — see the last bullet of §5 in
+`ASSURANCE-HANDBOOK.md` before assuming something here is broken.
+
 ## Getting these files into your own repository
 
 If you received this as a folder/zip rather than a git remote:
